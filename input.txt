@@ -1,0 +1,13 @@
+int x;
+float y;
+double z;
+string name;
+bool isActive;
+char initial;
+
+for (int i = 0; i < 10; i++) {
+    y = y + 1.5;
+}
+while (isActive) {
+    x = x - 1;
+}
