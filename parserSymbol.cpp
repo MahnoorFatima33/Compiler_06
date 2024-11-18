@@ -3,7 +3,7 @@
 #include <vector>
 #include <string>
 #include <cctype>
-#include <map>
+#include <stack>
 
 using namespace std;
 
@@ -54,6 +54,128 @@ struct Token
     int line;
 };
 
+struct Symbol
+{
+    string name;
+    TokenType type;
+    string value;
+};
+struct ThreeAddressCode
+{
+    string temp;
+    string op;
+    string arg1;
+    string arg2;
+    string toString() const
+    {
+        return temp + " = " + arg1 + " " + op + " " + arg2;
+    }
+};
+
+class TACGenerator
+{
+private:
+    vector<ThreeAddressCode> tacList;
+    stack<string> tempStack;
+    int count = 0;
+    string generateTempVar()
+    {
+        return "t" + to_string(count++);
+    }
+
+public:
+    void generateTAC(const vector<Token> &tokens)
+    {
+        stack<string> operatorStack;
+        stack<string> operandStack;
+        for (const auto &token : tokens)
+        {
+            if (token.type == T_NUM || token.type == T_ID)
+            {
+                operandStack.push(token.value);
+            }
+            else if (token.type == T_PLUS || token.type == T_MINUS || token.type == T_MUL || token.type == T_DIV)
+            {
+                operatorStack.push(token.value);
+            }
+            else if (token.type == T_LPAREN)
+            {
+                operatorStack.push(token.value);
+            }
+            else if (token.type == T_RPAREN)
+            {
+                while (!operatorStack.empty() && operatorStack.top() != "(")
+                {
+                    string op = operatorStack.top();
+                    operatorStack.pop();
+                    string arg2 = operandStack.top();
+                    operandStack.pop();
+                    string arg1 = operandStack.top();
+                    operandStack.pop();
+                    string temp = generateTempVar();
+                    tacList.push_back({temp, op, arg1, arg2});
+                    operandStack.push(temp);
+                    cout << "Operator: " << op << ", Arg1: " << arg1 << ", Arg2: " << arg2 << endl;
+                }
+                if (!operatorStack.empty())
+                    operatorStack.pop();
+                    
+            }
+        }
+        while (!operatorStack.empty())
+        {
+            string op = operatorStack.top();
+            operatorStack.pop();
+            string arg2 = operandStack.top();
+            operandStack.pop();
+            string arg1 = operandStack.top();
+            operandStack.pop();
+            string temp = generateTempVar();
+            tacList.push_back({temp, op, arg1, arg2});
+            operandStack.push(temp);
+            cout << "Operator: " << op << ", Arg1: " << arg1 << ", Arg2: " << arg2 << endl;
+        }
+        
+    }
+    void printTAC() const
+    {
+        cout << "\nThree Address Code is:" << endl;
+        for (const auto &tac : tacList)
+        {
+            cout << tac.toString() << endl;
+        }
+    }
+};
+
+class SymbolTable
+{
+private:
+    vector<Symbol> symbols;
+
+public:
+    void addSymbol(const string &name, TokenType type, const string &value = "")
+    {
+        symbols.push_back(Symbol{name, type, value});
+    }
+    bool lookup(const string &name)
+    {
+        for (const auto &symbol : symbols)
+        {
+            if (symbol.name == name)
+                return true;
+        }
+        return false;
+    }
+    void printTable()
+    {
+        cout << "\nSymbol Table:" << endl;
+        for (const auto &symbol : symbols)
+        {
+            cout << "Name: " << symbol.name << ", Type: " << symbol.type << ", Value: " << symbol.value << endl;
+        }
+    }
+};
+
 class Lexer
 {
 private:
@@ -63,7 +185,6 @@ private:
 
 public:
     Lexer(const string &src) : src(src), pos(0), line(1) {}
-
     string consumeNumber()
     {
         size_t start = pos;
@@ -71,7 +192,6 @@ public:
             pos++;
         return src.substr(start, pos - start);
     }
-
     string consumeWord()
     {
         size_t start = pos;
@@ -79,22 +199,18 @@ public:
             pos++;
         return src.substr(start, pos - start);
     }
-
     vector<Token> tokenize()
     {
         vector<Token> tokens;
-
         while (pos < src.size())
         {
             char current = src[pos];
-
             if (current == '\n')
             {
                 line++;
                 pos++;
                 continue;
             }
-
             if (isspace(current))
             {
                 pos++;
@@ -110,7 +226,7 @@ public:
             }
             if (current == '"')
             {
-                pos++; 
+                pos++;
                 string strLiteral;
                 while (pos < src.size() && src[pos] != '"')
                 {
@@ -119,7 +235,7 @@ public:
                 }
                 if (pos < src.size() && src[pos] == '"')
                 {
-                    pos++; 
+                    pos++;
                     tokens.push_back(Token{T_STRING_LITERAL, strLiteral, line});
                 }
                 else
@@ -134,7 +250,6 @@ public:
                 tokens.push_back(Token{T_NUM, consumeNumber(), line});
                 continue;
             }
-
             if (isalpha(current))
             {
                 string word = consumeWord();
@@ -168,7 +283,6 @@ public:
                     tokens.push_back(Token{T_ID, word, line});
                 continue;
             }
-
             switch (current)
             {
             case '=':
@@ -258,7 +372,6 @@ public:
                     exit(1);
                 }
                 break;
-
             default:
                 cout << "Unexpected character: " << current << " at line " << line << endl;
                 exit(1);
@@ -269,13 +382,12 @@ public:
         return tokens;
     }
 };
-
 class Parser
 {
 private:
     vector<Token> tokens;
     size_t pos;
-
+    SymbolTable symbolTable;
     void expect(TokenType type)
     {
         if (tokens[pos].type == type)
@@ -290,201 +402,88 @@ private:
             exit(1);
         }
     }
-
-    void parseStatement()
-    {
-        if (tokens[pos].type == T_INT || tokens[pos].type == T_FLOAT || tokens[pos].type == T_DOUBLE ||
-            tokens[pos].type == T_STRING || tokens[pos].type == T_BOOL || tokens[pos].type == T_CHAR)
-        {
-            parseDeclaration(tokens[pos].type);
-        }
-        else if (tokens[pos].type == T_ID)
-        {
-            parseAssignment();
-        }
-        else if (tokens[pos].type == T_IF)
-        {
-            parseIfStatement();
-        }
-        else if (tokens[pos].type == T_RETURN)
-        {
-            parseReturnStatement();
-        }
-        else if (tokens[pos].type == T_LBRACE)
-        {
-            parseBlock();
-        }
-        else if (tokens[pos].type == T_FOR)
-        {
-            parseForLoop();
-        }
-        else if (tokens[pos].type == T_WHILE)
-        {
-            parseWhileLoop();
-        }
-        else
-        {
-            cout << "Syntax error: unexpected token '" << tokens[pos].value
-                 << "' at line " << tokens[pos].line << endl;
-            exit(1);
-        }
-    }
-
-    void parseBlock()
-    {
-        expect(T_LBRACE);
-        while (tokens[pos].type != T_RBRACE && tokens[pos].type != T_EOF)
-        {
-            parseStatement();
-        }
-        expect(T_RBRACE);
-    }
-
     void parseDeclaration(TokenType type)
     {
         expect(type);
+        string varName = tokens[pos].value;
         expect(T_ID);
 
-        // Optional initialization
+        // Add to symbol table
+        symbolTable.addSymbol(varName, type);
+
         if (tokens[pos].type == T_ASSIGN)
         {
             expect(T_ASSIGN);
-            parseExpression();
+            string value = tokens[pos].value;
+            expect(T_NUM);
+            symbolTable.addSymbol(varName, type, value);
         }
 
         expect(T_SEMICOLON);
-    }
-
-    void parseAssignment()
-    {
-        expect(T_ID);
-        expect(T_ASSIGN);
-        parseExpression();
-        expect(T_SEMICOLON);
-    }
-
-    void parseIfStatement()
-    {
-        expect(T_IF);
-        expect(T_LPAREN);
-        parseExpression();
-        expect(T_RPAREN);
-        parseStatement();
-        if (tokens[pos].type == T_ELSE)
-        {
-            expect(T_ELSE);
-            parseStatement();
-        }
-    }
-
-     void parseForLoop()
-    {
-        expect(T_FOR);
-        expect(T_LPAREN);
-        parseStatement(); 
-        parseExpression();
-        parseExpression(); 
-        expect(T_SEMICOLON);
-        expect(T_RPAREN);
-        parseStatement(); 
-    }
-    void parseWhileLoop()
-    {
-        expect(T_WHILE);
-        expect(T_LPAREN);
-        parseExpression(); 
-        expect(T_RPAREN);
-        parseStatement(); 
-    }
-    void parseReturnStatement()
-    {
-        expect(T_RETURN);
-        parseExpression();
-        expect(T_SEMICOLON);
-    }
-
-    void parseExpression()
-    {
-        parseTerm();
-        while (tokens[pos].type == T_PLUS || tokens[pos].type == T_MINUS)
-        {
-            pos++;
-            parseTerm();
-        }
-        if (tokens[pos].type == T_GT)
-        {
-            pos++;
-            parseExpression();
-        }
-    }
-
-    void parseTerm()
-    {
-        parseFactor();
-        while (tokens[pos].type == T_MUL || tokens[pos].type == T_DIV)
-        {
-            pos++;
-            parseFactor();
-        }
-    }
-
-    void parseFactor()
-    {
-        if (tokens[pos].type == T_NUM ||tokens[pos].type == T_STRING_LITERAL ||  tokens[pos].type == T_ID || tokens[pos].type == T_TRUE || tokens[pos].type == T_FALSE)
-        {
-            pos++;
-        }
-        else if (tokens[pos].type == T_LPAREN)
-        {
-            expect(T_LPAREN);
-            parseExpression();
-            expect(T_RPAREN);
-        }
-        else
-        {
-            cout << "Syntax error: unexpected token " << tokens[pos].value << endl;
-            exit(1);
-        }
     }
 
 public:
     Parser(const vector<Token> &tokens) : tokens(tokens), pos(0) {}
-
-    void parseProgram()
+    void parse()
     {
         while (tokens[pos].type != T_EOF)
         {
-            parseStatement();
+            if (tokens[pos].type == T_INT)
+            {
+                parseDeclaration(T_INT);
+            }
+            else if (tokens[pos].type == T_FLOAT)
+            {
+                parseDeclaration(T_FLOAT);
+            }
+            else if (tokens[pos].type == T_DOUBLE)
+            {
+                parseDeclaration(T_DOUBLE);
+            }
+            else if (tokens[pos].type == T_CHAR)
+            {
+                parseDeclaration(T_CHAR);
+            }
+            else if (tokens[pos].type == T_STRING)
+            {
+                parseDeclaration(T_STRING);
+            }
+            else if (tokens[pos].type == T_BOOL)
+            {
+                parseDeclaration(T_BOOL);
+            }
+            else
+            {
+                pos++;
+            }
         }
-        cout << "Parsing completed successfully! No syntax error." << endl;
+        symbolTable.printTable();
     }
 };
-
 int main(int argc, char *argv[])
 {
-
     if (argc < 2)
     {
         cout << "Provide a file name" << endl;
         return 1;
     }
-
     ifstream file(argv[1]);
     if (!file.is_open())
     {
         cout << "Failed to open file." << endl;
         return 1;
     }
-
     string source((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
     Lexer lexer(source);
     vector<Token> tokens = lexer.tokenize();
-
     for (const auto &token : tokens)
     {
-        cout << "Token: " << token.value << " (Type: " << token.type << ") at line " << token.line << endl;
+        cout << "Token: " << token.value << ", Type: " << token.type << ", Line: " << token.line << endl;
     }
-    Parser parser(tokens);
-    parser.parseProgram();
+    SymbolTable symbolTable;
+    symbolTable.printTable();
+    TACGenerator tacGenerator;
+    tacGenerator.generateTAC(tokens);
+    tacGenerator.printTAC();
     return 0;
 }
